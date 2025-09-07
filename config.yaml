@@ -1,0 +1,12 @@
+---
+
+locus: "chr1:1-200000"
+number_simulation: 1
+model_manifest: "inputFiles/model_manifest.young.tbl"
+
+HumanRef: inputFiles/temp.fa
+
+seq2beRM: "CMP_CMP_1"
+OutGroup: "CMP_CMP_0"
+
+

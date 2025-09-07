@@ -1,0 +1,410 @@
+import os, re
+import pandas as pd
+import numpy as np
+import glob
+
+
+#shell.prefix("source config.sh; set -eo pipefail; set -o nounset; set -o errexit; set -x;")
+shell.prefix("source config.sh; set -eo pipefail; set -o nounset; set -o errexit; set -x;")
+SNAKEMAKE_DIR = os.path.dirname(workflow.snakefile)
+
+configfile: "config.yaml"
+
+#if not os.path.exists("log"):
+#	os.makedirs("log")
+
+
+model_manifest = config["model_manifest"]
+
+dict_model_params = {}
+with open(model_manifest) as fin:
+	for line in fin:
+		if line.startswith("modelID"):
+			continue
+		modelID, Tsp_p01_p23, Tsp_p0_p1, Tsp_p2_p3, sampleHaploSize, inv_freq, rho, mig_const = line.strip().split("\t")
+		dict_model_params[modelID] = (Tsp_p01_p23, Tsp_p0_p1, Tsp_p2_p3, sampleHaploSize, inv_freq, rho, mig_const)
+
+
+number_simulation = config["number_simulation"]
+l_simIDs = ["sim%s" % x for x in range(number_simulation)]
+
+locus = config["locus"]
+chromID, segment = locus.split(":")
+pos_start, pos_end = [int(x) for x in segment.split("-")]
+seq_length = pos_end - pos_start + 1
+
+
+REF = config["HumanRef"]
+seq2beRM = config["seq2beRM"]
+OutGroup = config["OutGroup"]
+
+
+def _getVCF(wildcards):
+	return config["SNV_VCF"]
+
+
+#wildcard_constraints:
+#    locus="recurrent_[0-9]+INVs?_[a-zA-Z]+",
+
+
+
+def all_regions(wildcards):
+	rtn = []
+	pat0 = "output/{modelID}/{locus}/plot/{locus}.polarizedHap.wCMP.pdf"
+	pat1 = "output/{modelID}/{locus}/plot/{locus}.treefile.pdf"
+	pat2 = "output/{modelID}/{locus}/plot/{locus}.pairwiseIBS.pdf"
+	pat3 = "output/{modelID}/{locus}/plot/{locus}.PC1vsPC2.pdf"
+	pat4 = "output/{modelID}/{locus}/plot/{locus}.treefile.pdf"
+	pat5 = "output/{modelID}/{locus}/plot/{locus}.cladogram.treefile.pdf"
+	pat6 = "output/{modelID}/{locus}/plot/{locus}.timetree.iqtree.pdf"
+	pat7 = "output/{modelID}/{locus}/plot/{locus}.cladogramMut.pdf"
+	pat8 = "output/{modelID}/{locus}/plot/{locus}.cladogramMut.v2.pdf"
+	pat9 = "combinedPDF/{modelID}/{modelID}_{locus}.combined.pdf"
+
+	for modelID in dict_model_params.keys():
+		for locus in l_simIDs:
+			rtn.append( pat0.format(modelID=modelID,locus=locus) )
+			rtn.append( pat1.format(modelID=modelID,locus=locus) )
+			rtn.append( pat2.format(modelID=modelID,locus=locus) )
+			rtn.append( pat3.format(modelID=modelID,locus=locus) )
+			rtn.append( pat4.format(modelID=modelID,locus=locus) )
+			rtn.append( pat5.format(modelID=modelID,locus=locus) )
+			rtn.append( pat6.format(modelID=modelID,locus=locus) )
+			rtn.append( pat7.format(modelID=modelID,locus=locus) )
+			rtn.append( pat8.format(modelID=modelID,locus=locus) )
+			rtn.append( pat9.format(modelID=modelID,locus=locus) )
+	return(rtn)
+
+
+rule dummy :
+	input : all_regions, 
+			expand("output/{modelID}/all.minMutHomoplasy.dat", modelID=dict_model_params.keys()),
+			expand("output/{modelID}/all.minMutHomoplasy.v2.dat", modelID=dict_model_params.keys())
+
+
+rule combinedPDF:
+	input : 
+		"output/{modelID}/{locus}/plot/{locus}.polarizedHap.wCMP.pdf",
+		"output/{modelID}/{locus}/plot/{locus}.PC1vsPC2.pdf",
+#		"output/{modelID}/{locus}/plot/{locus}.elemDiff_pairHaps.pdf",
+		"output/{modelID}/{locus}/plot/{locus}.pairwiseIBS.pdf",
+		"output/{modelID}/{locus}/plot/{locus}.treefile.pdf",
+		"output/{modelID}/{locus}/plot/{locus}.cladogram.treefile.pdf",
+#		"output/{modelID}/{locus}/plot/{locus}.timetree.iqtree.pdf",
+		"output/{modelID}/{locus}/plot/{locus}.cladogramMut.pdf",
+		"output/{modelID}/{locus}/plot/{locus}.cladogramMut.v2.pdf",
+	output: "combinedPDF/{modelID}/{modelID}_{locus}.combined.pdf",
+	resources:
+		mem_mb = 2048,
+		time = 4
+	shell:
+			"""
+				gs -dBATCH -dNOPAUSE -dCompatibilityLevel=1.4 -dDetectDuplicateImages -dCompressFonts=true -r50 -q -sDEVICE=pdfwrite -dPDFSETTINGS=/default -sOutputFile={output}  {input} 
+			"""
+
+
+rule plotCladogramMut2:
+	input: 
+			"output/{modelID}/{locus}/iqtree/{locus}.treefile.wMut.v2.nwk", 
+			"output/{modelID}/{locus}/data/mapping_hap_SV.txt",
+	output: 
+			"output/{modelID}/{locus}/iqtree/{locus}.treefile.wMut.new.v2.nwk", 
+			"output/{modelID}/{locus}/plot/{locus}.cladogramMut.v2.pdf",
+	resources:
+		mem_mb = 2048,
+		time = 4
+	shell:
+			"""
+			sed "s/'//g" {input[0]} > {output[0]};
+			prefix=`basename {input[0]} .treefile.wMut.v2.nwk`; outDir=`dirname $(dirname {input[1]})`;
+			Rscript {SNAKEMAKE_DIR}/scripts/plotTree.cladogramWmut.r  {output[0]}  {input[1]}  ${{outDir}}/plot/${{prefix}}  cladogramMut.v2.pdf
+			"""
+
+
+rule plotCladogramMut1:
+	input: 
+			"output/{modelID}/{locus}/iqtree/{locus}.treefile.wMut.nwk", 
+			"output/{modelID}/{locus}/data/mapping_hap_SV.txt",
+	output: 
+			"output/{modelID}/{locus}/iqtree/{locus}.treefile.wMut.new.nwk", 
+			"output/{modelID}/{locus}/plot/{locus}.cladogramMut.pdf",
+	resources:
+		mem_mb = 2048,
+		time = 4
+	shell:
+			"""
+			sed "s/'//g" {input[0]} > {output[0]};
+			prefix=`basename {input[0]} .treefile.wMut.nwk`; outDir=`dirname $(dirname {input[1]})`;
+			Rscript {SNAKEMAKE_DIR}/scripts/plotTree.cladogramWmut.r  {output[0]}  {input[1]}  ${{outDir}}/plot/${{prefix}} cladogramMut.pdf
+			"""
+
+
+rule merge_minMut2:
+	input: expand("output/{{modelID}}/{locus}/minMutHomplasy/{locus}.minMutHomoplasy.v2.data", locus=l_simIDs)
+	output: "output/{modelID}/all.minMutHomoplasy.v2.dat"
+	resources:
+		mem_mb = 4096,
+		time = 4
+	shell:
+			"""
+				cat {input} > {output} 
+			"""
+
+
+rule merge_minMut1:
+	input: expand("output/{{modelID}}/{locus}/minMutHomplasy/{locus}.minMutHomoplasy.data", locus=l_simIDs)
+	output: "output/{modelID}/all.minMutHomoplasy.dat"
+	resources:
+		mem_mb = 4096,
+		time = 4
+	shell:
+			"""
+				cat {input} > {output} 
+			"""
+
+
+rule minMutHomoplasy2:
+	input: 
+			"output/{modelID}/{locus}/iqtree/{locus}.treefile",   			
+			"output/{modelID}/{locus}/data/mapping_hap_SV.txt.new",
+	output: "output/{modelID}/{locus}/minMutHomplasy/{locus}.minMutHomoplasy.v2.data", 
+	resources:
+		mem_mb = 4096,
+		time = 4
+	shell:
+			"""
+				python scripts/computeMinMutations.test.py  {input[0]}  {input[1]}  {wildcards.locus}  {OutGroup}  >  {output} 
+			"""
+
+
+rule minMutHomoplasy1:
+	input: 
+			"output/{modelID}/{locus}/iqtree/{locus}.treefile",   			
+			"output/{modelID}/{locus}/data/mapping_hap_SV.txt",
+	output: "output/{modelID}/{locus}/minMutHomplasy/{locus}.minMutHomoplasy.data", 
+	resources:
+		mem_mb = 4096,
+		time = 2
+	shell:
+			"""
+				python scripts/computeMinMutations.py  {input[0]}  {input[1]}  {wildcards.locus}  {OutGroup}  >  {output} 
+			"""
+
+
+rule getMut_NWK2:
+	input:
+			"output/{modelID}/{locus}/iqtree/{locus}.treefile",   			
+			"output/{modelID}/{locus}/data/mapping_hap_SV.txt.new",
+	output: "output/{modelID}/{locus}/iqtree/{locus}.treefile.wMut.v2.nwk", 
+	resources:
+		mem_mb = 4096,
+		time = 2
+	shell:
+			"""
+			prefix=`basename {input[0]} .treefile`; outDir=`dirname {input[0]}`;
+			python scripts/getMutState_tree.test.py  {input[0]}  {OutGroup}  {input[1]}  ${{outDir}}/${{prefix}}.treefile.wMut.v2
+
+			"""
+
+
+rule getMut_NWK1:
+	input:
+			"output/{modelID}/{locus}/iqtree/{locus}.treefile",   			
+			"output/{modelID}/{locus}/data/mapping_hap_SV.txt",
+	output: "output/{modelID}/{locus}/iqtree/{locus}.treefile.wMut.nwk", 
+	resources:
+		mem_mb = 4096,
+		time = 2
+	shell:
+			"""
+			prefix=`basename {input[0]} .treefile`; outDir=`dirname {input[0]}`;
+			python scripts/getMutState_tree.py  {input[0]}  {OutGroup}  {input[1]}  ${{outDir}}/${{prefix}}.treefile.wMut
+
+			"""
+
+
+rule plotTree:
+	input: 
+			tped = "output/{modelID}/{locus}/data/{locus}.vcf.hap.tped",
+			mapping = "output/{modelID}/{locus}/data/mapping_hap_SV.txt",
+			tree = "output/{modelID}/{locus}/iqtree/{locus}.treefile",
+			timetree = "output/{modelID}/{locus}/iqtree/{locus}.timetree.nex",
+	output: "output/{modelID}/{locus}/plot/{locus}.treefile.pdf",
+			"output/{modelID}/{locus}/plot/{locus}.cladogram.treefile.pdf",
+			"output/{modelID}/{locus}/plot/{locus}.timetree.iqtree.pdf",
+	resources:
+		mem_mb = 4096,
+		time = 4
+	run:
+		shell("""
+			outDir=`dirname $(dirname {input.tped})` ; Rscript {SNAKEMAKE_DIR}/scripts/plotTree.r  {SNAKEMAKE_DIR}/{input.tped}  {SNAKEMAKE_DIR}/{input.mapping}  {SNAKEMAKE_DIR}/{input.tree}  {SNAKEMAKE_DIR}/{input.timetree}  ${{outDir}}/plot  {wildcards.locus}  """ )
+
+
+
+rule IQTree:
+	input: 
+			"output/{modelID}/{locus}/data/{locus}.fa",
+			"output/{modelID}/{locus}/data/dateFile.txt",
+			"output/{modelID}/{locus}/plot/{locus}.pairwiseIBS.pdf",
+#			"output/{modelID}/{locus}/plot/{locus}.elemDiff_pairHaps.pdf"
+	output: "output/{modelID}/{locus}/iqtree/{locus}.treefile", 
+			"output/{modelID}/{locus}/iqtree/{locus}.timetree.nex",
+	resources:
+		mem_mb = 4096,
+		time = 4
+	run:
+		shell("""
+			cd $(dirname $(dirname {input[0]}))/iqtree ;
+			iqtree  -safe -s {SNAKEMAKE_DIR}/{input[0]} -keep-ident -bb 1000 -redo  -m MFPMERGE -pre {wildcards.locus}  -o %s --date {SNAKEMAKE_DIR}/{input[1]}  --date-options "-u 0"  --clock-sd 0.4 --date-tip 0  --date-ci 1000 
+		""" % OutGroup)
+
+
+
+rule plotIBS1:
+	input: "output/{modelID}/{locus}/data/{locus}.IBS.dat",
+			"output/{modelID}/{locus}/data/{locus}.elemDiff_pairHaps.dat"
+	output: "output/{modelID}/{locus}/plot/{locus}.pairwiseIBS.pdf",
+#			"output/{modelID}/{locus}/plot/{locus}.elemDiff_pairHaps.pdf"
+	resources:
+		mem_mb = 10240,
+		time = 4
+	shell:
+			"""
+			Rscript scripts/plot_IBS.r  {input[0]}  {input[1]}  {output[0]} 
+			
+			"""
+#			Rscript scripts/plot_IBS.r  {input[0]}  {input[1]}  {output[0]}  {output[1]}
+
+
+rule computeIBS1:
+	input: 
+			"output/{modelID}/{locus}/data/{locus}.vcf.hap.tped", 
+			"output/{modelID}/{locus}/data/{locus}.vcf.hap.tfam", 
+			"output/{modelID}/{locus}/data/mapping_hap_SV.txt",
+	output: "output/{modelID}/{locus}/data/{locus}.IBS.dat",
+			"output/{modelID}/{locus}/data/{locus}.elemDiff_pairHaps.dat",
+	resources:
+		mem_mb = 6144,
+		time = 4
+	shell:
+			"""
+			python scripts/pairwiseIBS.py  {input[0]}  {input[1]}  {input[2]}  {output[0]}  >  {output[1]}
+
+			"""
+
+
+rule plotPCA:
+	input:  "output/{modelID}/{locus}/data/{locus}.vcf.hap.tped",
+			"output/{modelID}/{locus}/data/{locus}.vcf.hap.tfam",
+			"output/{modelID}/{locus}/data/mapping_hap_SV.txt",
+	output: "output/{modelID}/{locus}/plot/{locus}.PC1vsPC2.pdf",
+			"output/{modelID}/{locus}/data/dateFile.txt",
+	resources:
+		mem_mb = 4096,
+		time = 4
+	run:
+		shell("""
+			outDir=`dirname $(dirname {input[0]})` ;
+			Rscript {SNAKEMAKE_DIR}/scripts/haplotypePCA.r  {SNAKEMAKE_DIR}/{input[0]}  {SNAKEMAKE_DIR}/{input[1]}  {SNAKEMAKE_DIR}/{input[2]}  %s %s ${{outDir}}/plot
+			""" % (wildcards.locus, OutGroup))
+
+
+
+rule VCF2TPED1:
+	input:	
+			 vcf = "output/{modelID}/{locus}/data/{locus}.vcf.gz",
+			 mapping = "output/{modelID}/{locus}/data/mapping_hap_SV.txt",
+	output: "output/{modelID}/{locus}/data/{locus}.vcf.hap.tped",
+			"output/{modelID}/{locus}/data/{locus}.vcf.hap.tfam",
+	resources:
+		mem_mb = 4096,
+		time = 4
+	shell:
+			"""
+			cd $(dirname {input.vcf});
+			zcat $(basename {input.vcf}) | python {SNAKEMAKE_DIR}/scripts/phasedVCF2tped.py  -  {wildcards.locus}.vcf.hap ;
+
+			"""
+
+
+
+rule getFASTA_byRegion:
+	input: 
+			mapping = "output/{modelID}/{locus}/data/mapping_hap_SV.txt",
+			vcf = "output/{modelID}/{locus}/data/{locus}.wAA.vcf.gz",
+			ref = REF,
+	output: 
+			"output/{modelID}/{locus}/data/{locus}.fa" 
+	params: 
+			seq2beRM = seq2beRM,
+	resources:
+		mem_mb = 4096,
+		time = 4
+	run:
+		seq2beRM = params.seq2beRM
+		with open(input.mapping) as fin:
+			for line in fin:
+				line = line.strip().split()
+				if line[1] == "NA":
+					seq2beRM += ",%s" % line[0]
+		print (seq2beRM)
+		shell ("""   python scripts/phasedVCF2Fasta.py --locus %s --reference {input.ref}  --vcf {input.vcf} --addAAseq %s --fout - |  python scripts/rmFASTAseqs.py -i -  -s  %s  > {output}   """  % (locus, OutGroup, seq2beRM))
+
+
+
+rule plotHaplotypes:
+	input:
+			 tped = "output/{modelID}/{locus}/data/{locus}.wAA.vcf.tped",
+			 tfam = "output/{modelID}/{locus}/data/{locus}.wAA.vcf.tfam",
+			 SV = "output/{modelID}/{locus}/data/mapping_hap_SV.txt"
+	output: "output/{modelID}/{locus}/plot/{locus}.polarizedHap.wCMP.pdf",
+	resources:
+		mem_mb = 2048,
+		time = 4
+	shell:
+			"""
+				prefix=`basename {input.tped} .wAA.vcf.tped`; outDir=`dirname $(dirname {input.tped})`;
+				Rscript scripts/plotPolarizedHap.wCMP.r  {input[0]}  {input[1]}  {input[2]}  ${{outDir}}/plot/${{prefix}} %s 
+			""" % seq2beRM
+
+
+rule VCF2TPED2:
+	input:
+			 vcf = "output/{modelID}/{locus}/data/{locus}.wAA.vcf.gz",
+	output:
+			 tped = "output/{modelID}/{locus}/data/{locus}.wAA.vcf.tped",
+			 tfam = "output/{modelID}/{locus}/data/{locus}.wAA.vcf.tfam",
+	resources:
+		mem_mb = 4096,
+		time = 4
+	shell:
+			"""
+				prefix=`basename {input.vcf} .gz`; outDir=`dirname {input.vcf}`; zcat {input[0]} | python scripts/phasedVCF2tped.polarize.py - ${{outDir}}/${{prefix}}  None True True
+			"""
+
+
+rule addAA2VCF:
+	input: 
+			 vcf = "output/{modelID}/{locus}/data/{locus}.vcf.gz",
+	output:
+			 vcf = "output/{modelID}/{locus}/data/{locus}.wAA.vcf.gz",
+			 mapping = "output/{modelID}/{locus}/data/mapping_hap_SV.txt",
+			 mapping_new = "output/{modelID}/{locus}/data/mapping_hap_SV.txt.new"
+	resources:
+		mem_mb = 4096,
+		time = 4
+	run:
+		shell (""" zcat {input.vcf} | python scripts/ancestralstateInVCF.forINVsim.test.py  std  std  {output.mapping}  | bgzip -c > {output.vcf} && tabix -p vcf {output.vcf}""" )
+
+
+rule msprime2VCF:
+	output: 
+			 vcf = "output/{modelID}/{locus}/data/{locus}.vcf.gz",
+	resources:
+		mem_mb = 4096,
+		time = 4
+	run:
+		Tsp_p01_p23, Tsp_p0_p1, Tsp_p2_p3, sampleHaploSize, inv_freq, rho, mig_const = dict_model_params[wildcards.modelID]
+		shell (""" python scripts/recurrentINV_m1.2pop.py  %s %s %s %s %s %s %s %s %s | bgzip -c > {output.vcf} """ % (Tsp_p01_p23, Tsp_p0_p1, Tsp_p2_p3, sampleHaploSize, inv_freq, rho, mig_const, seq_length, chromID))
+
+

@@ -1,0 +1,20 @@
+cluster: mkdir -p cluster_logs/{rule} && sbatch --partition=msismall --nodes=1 --ntasks-per-node={threads} --mem={resources.mem_mb} --tmp={resources.disk_mb} --time={resources.time}:00:00 --job-name=smk-{rule}-{wildcards} --output=cluster_logs/{rule}/{rule}.{wildcards}.%j.out --export=all --parsable 
+
+default-resources:
+  - disk_mb=4096
+  - mem_mb=4096
+  - time=4
+
+jobs: 200
+rerun-incomplete: True
+cluster-cancel: scancel
+cluster-cancel-nargs: 500 # cancel 500 jobs at a time, all will still be canceled
+printshellcmds: True
+reason: True
+show-failed-logs: True 
+latency-wait: 60
+cluster-status: status-sacct.sh
+#use-conda: True
+max-jobs-per-second: 200
+#rerun-triggers: mtime 
+#restart-times: 0
