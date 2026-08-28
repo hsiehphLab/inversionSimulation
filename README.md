@@ -5,7 +5,8 @@
 #### Python (v3.10)
 #### Snakemake (v7.2)
 #### R
-
+#### msprime (v2.1.2)
+#### IQ-TREE (v3.1.3)
 
 ## Input data
 #### All required input data are listed in the config.yaml file.
