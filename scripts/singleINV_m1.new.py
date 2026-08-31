@@ -56,7 +56,6 @@ demography.add_population_split(time=Tsp_p0_p1, derived=["pop1"], ancestral="pop
 
 # 2. Simulate Ancestry (Tree Sequence)
 # By passing a dictionary to `samples`, msprime generates haploid samples 
-# matching the logic of your original msprime.Sample(pop, 0) list.
 ts = msprime.sim_ancestry(
     samples={"pop0": diploid_sample_pop0, "pop1": diploid_sample_pop1},
     demography=demography,
